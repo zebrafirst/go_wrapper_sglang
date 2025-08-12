@@ -1,1 +1,0 @@
-docker buildx build . -t  artifacts.iflytek.com/docker-private/maas/sglang-go:v0.0.1

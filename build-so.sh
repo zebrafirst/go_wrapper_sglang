@@ -1,0 +1,1 @@
+go build -o bin/libwrapper.so -buildmode=plugin ./wrapper/wrapper.go
