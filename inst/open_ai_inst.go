@@ -56,10 +56,11 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 				logMap["massage"] = v.Error()
 			}
 		}
-		if log, err := th3apiutils.GetOtlpLog(th3api.Inst.Sid); err != nil {
+		if log, err1 := th3apiutils.GetOtlpLog(th3api.Inst.Sid); err1 == nil {
+			th3apiutils.WLogger.Info("", zap.Any("logMap", logMap))
 			log.LogMsgsAndFlush(logMap)
 		} else {
-			th3apiutils.WLogger.Warn("Get otlp log failed", zap.Any("err", err), zap.Any("logMap", logMap))
+			th3apiutils.WLogger.Warn("Get otlp log failed", zap.Any("err", err1), zap.Any("logMap", logMap))
 		}
 	}()
 
