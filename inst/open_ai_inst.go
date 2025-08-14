@@ -23,6 +23,8 @@ type OpenAITh3API struct {
 	Inst    *InstAdaptor
 	Ak      string
 	BaseUrl string
+	LogMap  map[string]interface{}
+	Ret     []string
 }
 
 func NewOpenAITh3API(inst *InstAdaptor) *OpenAITh3API {
@@ -30,12 +32,13 @@ func NewOpenAITh3API(inst *InstAdaptor) *OpenAITh3API {
 		Inst:    inst,
 		Ak:      config.GetBaseConf().Th3ApiAK,
 		BaseUrl: config.GetBaseConf().Th3ApiBaseUrl,
+		LogMap:  make(map[string]interface{}),
 	}
 }
 
 func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 	var err error
-	logMap := make(map[string]interface{})
+	logMap := th3api.LogMap
 	logMap["sid"] = th3api.Inst.Sid
 	logMap["code"] = 0
 	logMap["massage"] = "success"
@@ -45,6 +48,7 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 	var retTT []int64
 
 	defer func() {
+		logMap["ret"] = th3api.Ret
 		logMap["retTT"] = retTT
 		if err != nil {
 			switch v := err.(type) {
@@ -112,6 +116,8 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 
 		if len(response.Choices) > 0 {
 			for _, v := range response.Choices {
+				// 记录th3api返回
+				th3api.Ret = append(th3api.Ret, v.Delta.Content)
 				content := model.Content{
 					Choices: []model.Choice{
 						{
@@ -180,6 +186,7 @@ func (th3api *OpenAITh3API) doReqStream(ctx context.Context) (stream *openai.Cha
 		th3apiutils.WLogger.Error("Th3api build chat req failed", zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
 		return nil, err
 	}
+	th3api.LogMap["th3apiReq"] = req
 	th3apiutils.WLogger.Info("th3api openAI req", zap.Any("th3apiReq", req), zap.String("sid", th3api.Inst.Sid))
 	return client.CreateChatCompletionStream(ctx, req)
 }
