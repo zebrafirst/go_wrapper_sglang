@@ -32,7 +32,7 @@ func WrapperInit(cfg map[string]string) (err error) {
 		fmt.Printf("New otlp event provider: %v \n", err)
 		return err
 	}
-
+	inst.InitWebSearchTemplate()
 	return nil
 }
 

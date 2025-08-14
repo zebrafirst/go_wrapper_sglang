@@ -102,7 +102,7 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			return errconvert.WrapperErr(err, errconvert.CallTh3ApiUnknowErrCode.Code)
 		}
 
-		th3apiutils.WLogger.Info("", zap.Any("resp", response))
+		th3apiutils.WLogger.Debug("", zap.Any("resp", response))
 
 		// 状态变更
 		if th3api.Inst.IsFirstRet {
@@ -205,38 +205,61 @@ func (th3api *OpenAITh3API) buildOpenAIClient() *openai.Client {
 
 func (th3api *OpenAITh3API) buildOpenAIChatCompletionRequest() (openai.ChatCompletionRequest, error) {
 	req := openai.ChatCompletionRequest{
-		Model:    th3api.Inst.Model,
-		Messages: th3api.buildChatReqMessage(),
-		Stream:   true,
+		Model:  th3api.Inst.Model,
+		Stream: true,
 		StreamOptions: &openai.StreamOptions{
 			IncludeUsage: true,
 		},
 	}
+	if messages, err := th3api.buildChatReqMessage(); err != nil {
+		return req, err
+	} else {
+		req.Messages = messages
+		th3apiutils.WLogger.Debug("", zap.Any("chatReqMessage", req))
+	}
+
 	if err := th3api.attachBaseParam(&req); err != nil {
 		return req, err
 	}
 	return req, nil
 }
 
-func (th3api *OpenAITh3API) buildChatReqMessage() []openai.ChatCompletionMessage {
+func (th3api *OpenAITh3API) buildChatReqMessage() ([]openai.ChatCompletionMessage, error) {
 	chatMessage := make([]openai.ChatCompletionMessage, 0, len(th3api.Inst.InDatas))
 
 	for _, v := range th3api.Inst.InDatas {
 		ldMessage := LoaderMessage{}
 		if err := json.Unmarshal([]byte(v), &ldMessage); err != nil {
 			th3apiutils.WLogger.Error("Unmarshal loader message failed", zap.String("message", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
-			continue
+			return nil, err
 		}
+
+		for i, v := range ldMessage.Messages {
+			if v.Role == common.ROLE_TOOL && v.ToolCallID == common.TOOL_CALL_ID_IFLY_SEARCH {
+				var sources []Source
+				if err := json.Unmarshal([]byte(v.Content), &sources); err != nil {
+					th3apiutils.WLogger.Error("Unmarshal web search source failed", zap.String("content", v.Content), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+					return nil, err
+				}
+				v.Sources = sources
+				th3apiutils.WLogger.Debug("", zap.Any("webSearchSources", sources))
+				ldMessage.Messages[i] = v
+			}
+		}
+
+		th3apiutils.WLogger.Debug("", zap.Any("loadMessage", ldMessage))
 
 		ws := NewWebSearch(&ldMessage)
 		if ws.NeedWebSearch {
+			th3apiutils.WLogger.Debug("Need web search", zap.Any("ws", ws))
 			for _, v1 := range ldMessage.Messages {
 				chatMessage = append(chatMessage, openai.ChatCompletionMessage{
-					Content: v1.Content,
-					Role:    v1.Role,
+					Content:    v1.Content,
+					Role:       v1.Role,
+					ToolCallID: v1.ToolCallID,
 				})
 			}
-
+			th3apiutils.WLogger.Debug("", zap.Any("webSearchRawChatMsg", chatMessage))
 			// 移除用户最后一次请求msg
 			lastUserIndex := -1
 			question := ""
@@ -254,7 +277,7 @@ func (th3api *OpenAITh3API) buildChatReqMessage() []openai.ChatCompletionMessage
 			// 移除联网搜索 msg
 			filterChatMessage := make([]openai.ChatCompletionMessage, 0, len(chatMessage))
 			for i := len(chatMessage) - 1; i >= 0; i-- {
-				if chatMessage[i].Role == common.ROLE_TOOL && chatMessage[i].ToolCallID == common.TOOL_CALL_ID_IFLY_SEARCH {
+				if chatMessage[i].Role == common.ROLE_TOOL {
 					continue
 				}
 				filterChatMessage = append(filterChatMessage, chatMessage[i])
@@ -266,7 +289,7 @@ func (th3api *OpenAITh3API) buildChatReqMessage() []openai.ChatCompletionMessage
 				Content: ws.BuildWebSearchPrompt(question),
 			})
 
-			return filterChatMessage
+			return filterChatMessage, nil
 		} else {
 			for _, v1 := range ldMessage.Messages {
 				chatMessage = append(chatMessage, openai.ChatCompletionMessage{
@@ -277,7 +300,7 @@ func (th3api *OpenAITh3API) buildChatReqMessage() []openai.ChatCompletionMessage
 		}
 	}
 
-	return chatMessage
+	return chatMessage, nil
 }
 
 func (th3api *OpenAITh3API) attachBaseParam(chatReq *openai.ChatCompletionRequest) error {

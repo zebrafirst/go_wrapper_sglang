@@ -23,6 +23,9 @@ const (
 
 	CFG_KEY_OTLP_LOG_ADDR = "otlpLogAddr"
 	CFG_KEY_OTLP_LOG_HOST = "otlpLogHost"
+
+	CFG_KEY_PROMPT_SEARCH_TEMPLATE          = "prompt_search_template"
+	CFG_KEY_PROMPT_SEARCH_TEMPLATE_NO_INDEX = "prompt_search_template_no_index"
 )
 
 type BaseConf struct {
@@ -42,6 +45,9 @@ type BaseConf struct {
 
 	OtlpLogAddr string // otlp日志上报ip
 	OtlpLogHost string // otlp日志上报host
+
+	PromptSearchTemplate        string // 联网搜索有抽槽模板
+	PromptSearchTemplateNoIndex string // 联网搜索无抽槽模板
 
 }
 
@@ -170,6 +176,9 @@ func NewBaseConf(cfg map[string]string) error {
 	} else {
 		baseConf.OtlpLogHost = "127.0.0.1:8080" // 默认addr
 	}
+
+	baseConf.PromptSearchTemplate = cfg[CFG_KEY_PROMPT_SEARCH_TEMPLATE]
+	baseConf.PromptSearchTemplateNoIndex = cfg[CFG_KEY_PROMPT_SEARCH_TEMPLATE_NO_INDEX]
 
 	return nil
 }
