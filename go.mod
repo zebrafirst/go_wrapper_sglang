@@ -43,12 +43,12 @@ require (
 	google.golang.org/protobuf v1.36.5 // indirect
 )
 
-replace comwrapper => D:\go-local-pkg\comwrapper
+replace comwrapper => ./go-local-pkg/comwrapper
 
-replace git.iflytek.com/AIaaS/otlp-self/v3 => D:\go-local-pkg\otlp
+replace git.iflytek.com/AIaaS/otlp-self/v3 => ./go-local-pkg/otlp
 
-replace git.iflytek.com/AIaaS/storage-gateway-sdk-self => D:\go-local-pkg\storage-gateway-sdk
+replace git.iflytek.com/AIaaS/storage-gateway-sdk-self => ./go-local-pkg/storage-gateway-sdk
 
-replace git.iflytek.com/AIaaS/finderhttp-self => D:\go-local-pkg\finderhttp
+replace git.iflytek.com/AIaaS/finderhttp-self => ./go-local-pkg/finderhttp
 
-replace git.iflytek.com/AIaaS/finder-go-self => D:\go-local-pkg\finder-go
+replace git.iflytek.com/AIaaS/finder-go-self => ./go-local-pkg/finder-go

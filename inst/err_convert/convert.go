@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	UnknowErrCode           = Th3apiErr{Code: 111111, Message: "Unknow err"}
-	CallTh3ApiUnknowErrCode = Th3apiErr{Code: 111112, Message: "Call th3api unknow err"} // 调三方api未知错误
+	UnknowErrCode           = Th3apiErr{Code: 1100, Message: "Unknow err"}                  // 调用三方插件未知错误
+	CallTh3ApiUnknowErrCode = Th3apiErr{Code: 1101, Message: "Call th3api unknow err"}      // 调三方api未知错误
+	UnmarshalExtraBodyErr   = Th3apiErr{Code: 1102, Message: "Unmarshal extra body failed"} // 反序列化extra body 失败
 )
 
 type Th3apiErr struct {

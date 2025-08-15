@@ -7,29 +7,33 @@ import (
 )
 
 type InstAdaptor struct {
-	Sid        string
-	UsrTag     string
-	MeterCount int
-	Params     map[string]string
-	Status     int
-	Cb         comwrapper.CallBackPtr
-	ReqNo      int
-	TimeOut    time.Duration
-	Model      string
-	InDatas    []string
-	IsFirstRet bool
-	ServiceId  string
-	Th3Api     Th3Api
+	Sid            string
+	UsrTag         string
+	MeterCount     int
+	Params         map[string]string
+	Status         int
+	Cb             comwrapper.CallBackPtr
+	ReqNo          int
+	TimeOut        time.Duration
+	TCPDialTimeOut time.Duration
+	Model          string
+	InDatas        []string
+	IsFirstRet     bool
+	ServiceId      string
+	Th3Api         Th3Api
+	CloseCh        chan struct{}
 }
 
 func NewInstAdaptor(usrTag, sid string, params map[string]string, cb comwrapper.CallBackPtr) *InstAdaptor {
 	inst := &InstAdaptor{
-		Sid:     sid,
-		UsrTag:  usrTag,
-		Params:  params,
-		Cb:      cb,
-		Model:   config.GetBaseConf().Th3ApiModelName,
-		TimeOut: time.Duration(config.GetBaseConf().Th3ApiTimeOut) * time.Second,
+		Sid:            sid,
+		UsrTag:         usrTag,
+		Params:         params,
+		Cb:             cb,
+		Model:          config.GetBaseConf().Th3ApiModelName,
+		TimeOut:        time.Duration(config.GetBaseConf().Th3ApiTimeOut) * time.Second,
+		TCPDialTimeOut: time.Duration(config.GetBaseConf().Th3ApiTCPDialTimeout) * time.Second,
+		CloseCh:        make(chan struct{}),
 	}
 	inst.Th3Api = Th3ApiFactory(inst)
 	return inst

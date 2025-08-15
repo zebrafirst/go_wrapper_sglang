@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"th3api/common"
 	"th3api/common/model"
 	"th3api/config"
@@ -79,12 +81,19 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 	defer stream.Close()
 
 	for {
-		var resp []comwrapper.WrapperData
+		select {
+		case <-th3api.Inst.CloseCh:
+			th3apiutils.WLogger.Error("会话被销毁", zap.String("sid", th3api.Inst.Sid))
+			return nil
+		default:
 
+		}
+
+		var resp []comwrapper.WrapperData
 		response, err := stream.Recv()
 		elapsed := time.Since(start).Milliseconds()
 		if isFirstRet {
-			logMap["firstRetTT"] = elapsed
+			logMap["TTFT"] = elapsed
 			isFirstRet = false
 		}
 		retTT = append(retTT, elapsed)
@@ -114,33 +123,31 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			th3api.Inst.Status = common.SESSION_STATUS_CONTINUE
 		}
 
-		if len(response.Choices) > 0 {
-			for _, v := range response.Choices {
-				// 记录th3api返回
-				th3api.Ret = append(th3api.Ret, v.Delta.Content)
-				content := model.Content{
-					Choices: []model.Choice{
-						{
-							Content:          v.Delta.Content,
-							Index:            th3api.Inst.ReqNo,
-							Role:             common.ROLE_ASSISTANT,
-							ReasoningContent: "",
-						},
+		for _, v := range response.Choices {
+			// 记录th3api返回
+			th3api.Ret = append(th3api.Ret, v.Delta.Content)
+			content := model.Content{
+				Choices: []model.Choice{
+					{
+						Content:          v.Delta.Content,
+						Index:            th3api.Inst.ReqNo,
+						Role:             common.ROLE_ASSISTANT,
+						ReasoningContent: v.Delta.ReasoningContent,
 					},
-					QuestionType: "",
-				}
-				th3api.Inst.ReqNo++
-				contentJsonBytes, _ := json.Marshal(content)
-
-				resp = append(resp, comwrapper.WrapperData{
-					Key:      common.MSG_KEY_CONTENT,
-					Data:     contentJsonBytes,
-					Desc:     nil,
-					Encoding: "utf-8",
-					Type:     comwrapper.DataText,
-					Status:   comwrapper.DataStatus(th3api.Inst.Status),
-				})
+				},
+				QuestionType: "",
 			}
+			th3api.Inst.ReqNo++
+			contentJsonBytes, _ := json.Marshal(content)
+
+			resp = append(resp, comwrapper.WrapperData{
+				Key:      common.MSG_KEY_CONTENT,
+				Data:     contentJsonBytes,
+				Desc:     nil,
+				Encoding: "utf-8",
+				Type:     comwrapper.DataText,
+				Status:   comwrapper.DataStatus(th3api.Inst.Status),
+			})
 		}
 
 		var usage model.Usage
@@ -148,6 +155,17 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			usage.TotalTokens = response.Usage.TotalTokens
 			usage.PromptTokens = response.Usage.PromptTokens
 			usage.CompletionTokens = response.Usage.CompletionTokens
+			usage.QuestionTokens = 4
+
+			// cachetoken 单独记一下
+			if response.Usage.PromptTokensDetails != nil {
+				cacheTokens := response.Usage.PromptTokensDetails.CachedTokens
+				logMap["cached_tokens"] = cacheTokens
+				if code := common.MeterFunc(th3api.Inst.UsrTag, "cached_tokens", cacheTokens); code != 0 {
+					th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("cached_tokens", cacheTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag))
+				}
+			}
+
 			logMap["usage"] = usage
 
 			// 上报自定义计量数据
@@ -160,17 +178,18 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			if code := common.MeterFunc(th3api.Inst.UsrTag, "prompt_tokens", usage.PromptTokens); code != 0 {
 				th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("prompt_tokens", usage.PromptTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag))
 			}
+
+			usageJsonBytes, _ := json.Marshal(usage)
+			resp = append(resp, comwrapper.WrapperData{
+				Key:      common.MSG_KEY_USAGE,
+				Data:     usageJsonBytes,
+				Desc:     nil,
+				Encoding: "utf-8",
+				Type:     comwrapper.DataText,
+				Status:   comwrapper.DataStatus(th3api.Inst.Status),
+			},
+			)
 		}
-		usageJsonBytes, _ := json.Marshal(usage)
-		resp = append(resp, comwrapper.WrapperData{
-			Key:      common.MSG_KEY_USAGE,
-			Data:     usageJsonBytes,
-			Desc:     nil,
-			Encoding: "utf-8",
-			Type:     comwrapper.DataText,
-			Status:   comwrapper.DataStatus(th3api.Inst.Status),
-		},
-		)
 
 		if err := cb(th3api.Inst.UsrTag, resp, nil); err != nil {
 			th3apiutils.WLogger.Error("Callback loader failed", zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
@@ -191,16 +210,28 @@ func (th3api *OpenAITh3API) doReqStream(ctx context.Context) (stream *openai.Cha
 	return client.CreateChatCompletionStream(ctx, req)
 }
 
+var (
+	clientInstance *openai.Client
+	once           sync.Once
+)
+
 func (th3api *OpenAITh3API) buildOpenAIClient() *openai.Client {
-	config := openai.DefaultConfig(th3api.Ak)
-	config.BaseURL = th3api.BaseUrl
+	once.Do(func() {
+		transport := &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: th3api.Inst.TCPDialTimeOut, // TCP 连接超时
+			}).DialContext,
+		}
 
-	// 设置超时
-	config.HTTPClient = &http.Client{
-		Timeout: th3api.Inst.TimeOut,
-	}
-
-	return openai.NewClientWithConfig(config)
+		config := openai.DefaultConfig(th3api.Ak)
+		config.BaseURL = th3api.BaseUrl
+		config.HTTPClient = &http.Client{
+			Timeout:   th3api.Inst.TimeOut, // http 总超时时间
+			Transport: transport,
+		}
+		clientInstance = openai.NewClientWithConfig(config)
+	})
+	return clientInstance
 }
 
 func (th3api *OpenAITh3API) buildOpenAIChatCompletionRequest() (openai.ChatCompletionRequest, error) {
@@ -304,6 +335,8 @@ func (th3api *OpenAITh3API) buildChatReqMessage() ([]openai.ChatCompletionMessag
 }
 
 func (th3api *OpenAITh3API) attachBaseParam(chatReq *openai.ChatCompletionRequest) error {
+	// todo: json mode
+
 	// temperature top_k max_tokens chat_id? tools:暂不支持 enable_thinking：不支持
 
 	if v, ok := th3api.Inst.Params[common.BASE_REQ_KEY_TEMPERATURE]; ok {
@@ -321,6 +354,23 @@ func (th3api *OpenAITh3API) attachBaseParam(chatReq *openai.ChatCompletionReques
 			chatReq.MaxTokens = int(maxTokens)
 		} else {
 			th3apiutils.WLogger.Warn("Parse maxTokens failed", zap.String("maxTokens", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+		}
+	}
+
+	// BASE_REQ_KEY_TOP_P
+	if v, ok := th3api.Inst.Params[common.BASE_REQ_KEY_TOP_P]; ok {
+		if topP, err := strconv.ParseFloat(v, 32); err == nil {
+			chatReq.TopP = float32(topP)
+		} else {
+			th3apiutils.WLogger.Warn("Parse maxTokens failed", zap.String("topP", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+		}
+	}
+
+	// extra_body
+	if v, ok := th3api.Inst.Params[common.BASE_REQ_KEY_EXTRA_BODY]; ok {
+		if err := json.Unmarshal([]byte(v), chatReq); err != nil {
+			th3apiutils.WLogger.Error("Parse extra body failed", zap.String("extraBody", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+			return errconvert.WrapperErr(err, errconvert.UnmarshalExtraBodyErr.Code)
 		}
 	}
 

@@ -31,6 +31,8 @@ const (
 	BASE_REQ_KEY_PREDICTION            = "prediction"
 	BASE_REQ_KEY_CHAT_TEMPLATE_KWARGS  = "chat_template_kwargs"
 	BASE_REQ_KEY_SERVICE_TIER          = "service_tier"
+
+	BASE_REQ_KEY_EXTRA_BODY = "extra_body"
 )
 
 // 日志等级

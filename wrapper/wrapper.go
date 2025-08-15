@@ -3,7 +3,6 @@ package main
 import (
 	"comwrapper"
 	"fmt"
-	"runtime/debug"
 	"th3api/common"
 	"th3api/config"
 	"th3api/inst"
@@ -37,7 +36,6 @@ func WrapperInit(cfg map[string]string) (err error) {
 }
 
 // WrapperCreate 插件会话实例创建, 每次建立会话请求时调用. 本地调试时, params参数由xtest.toml提供
-// todo: prsIds又是什么？
 func WrapperCreate(usrTag string, params map[string]string, prsIds []int, cb comwrapper.CallBackPtr) (hdl unsafe.Pointer, err error) {
 	sid := params["sid"]
 	paramStr := ""
@@ -66,7 +64,6 @@ func WrapperWrite(hdl unsafe.Pointer, req []comwrapper.WrapperData) (err error) 
 
 		th3apiutils.WLogger.Info("WrapperWrite data", zap.String("data", string(v.Data)), zap.Int("status", int(v.Status)), zap.String("sid", inst.Sid))
 
-		// todo: 写入的status是什么？
 		if err = inst.WriteIn(string(v.Data), v.Status); err != nil {
 			th3apiutils.WLogger.Error("WrapperWrite inst.write", zap.Any("err", err), zap.String("sid", inst.Sid))
 			return err
@@ -76,15 +73,15 @@ func WrapperWrite(hdl unsafe.Pointer, req []comwrapper.WrapperData) (err error) 
 	if inst.Cb != nil { // 如果异步流式会话方式，这里直接开始回写数据
 		th3apiutils.WLogger.Info("Session mode is async!", zap.String("sid", inst.Sid))
 		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					stack := debug.Stack()
-					th3apiutils.WLogger.Error("Engine pusher crashed",
-						zap.Any("err", r),
-						zap.String("sid", inst.Sid),
-						zap.String("stack", string(stack))) // 添加堆栈信息
-				}
-			}()
+			// defer func() {
+			// 	if r := recover(); r != nil {
+			// 		stack := debug.Stack()
+			// 		th3apiutils.WLogger.Error("Engine pusher crashed",
+			// 			zap.Any("err", r),
+			// 			zap.String("sid", inst.Sid),
+			// 			zap.String("stack", string(stack))) // 添加堆栈信息
+			// 	}
+			// }()
 			if err := inst.PushBack(inst.Cb); err != nil { // 数据回写过程中出现了问题，该如何上报出去？
 				th3apiutils.WLogger.Error("Engine push error", zap.Any("err", err), zap.String("sid", inst.Sid), zap.String("usrTag", inst.UsrTag))
 			}
@@ -104,6 +101,7 @@ func WrapperRead(hdl unsafe.Pointer) (respData []comwrapper.WrapperData, err err
 // WrapperDestroy 会话资源销毁
 func WrapperDestroy(hdl interface{}) (err error) {
 	inst := (*inst.InstAdaptor)(hdl.(unsafe.Pointer))
+	close(inst.CloseCh)
 	th3apiutils.WLogger.Info("WrapperDestroy", zap.String("sid", inst.Sid))
 	return
 }
@@ -135,7 +133,7 @@ func WrapperDebugInfo(hdl interface{}) (debug string) {
 	return
 }
 
-func WrapperSetCtrl(fType comwrapper.CustomFuncType, f interface{}) (err error) {
+func WrapperSetCtrl(fType comwrapper.CustomFuncType, f any) (err error) {
 	switch fType {
 	case comwrapper.FuncMeter:
 		common.MeterFunc = f.(func(usrTag string, key string, count int) (code int))

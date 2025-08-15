@@ -9,10 +9,11 @@ import (
 const (
 	CFG_KEY_SERVICE_ID = "serviceId"
 
-	CFG_KEY_TH3API_AK         = "th3apiAK"
-	CFG_KEY_TH3API_BASE_URL   = "th3apiBaseUrl"
-	CFG_KEY_TH3API_TIMEOUT    = "th3apiTimeout"
-	CFG_KEY_TH3API_MODEL_NAME = "th3apiModelName"
+	CFG_KEY_TH3API_AK               = "th3apiAK"
+	CFG_KEY_TH3API_BASE_URL         = "th3apiBaseUrl"
+	CFG_KEY_TH3API_TIMEOUT          = "th3apiTimeout"
+	CFG_KEY_TH3API_TCP_DIAL_TIMEOUT = "th3apiTcpDialTimeout"
+	CFG_KEY_TH3API_MODEL_NAME       = "th3apiModelName"
 
 	CFG_KEY_LOG_DIR         = "logDir"
 	CFG_KEY_LOG_MAX_SIZE    = "logMaxSize"
@@ -31,10 +32,11 @@ const (
 type BaseConf struct {
 	ServiceId string // 服务名称
 
-	Th3ApiAK        string // 接入三方api口令
-	Th3ApiBaseUrl   string // 接入三方api请求URL
-	Th3ApiTimeOut   int    // 请求三方超时时间,  默认60s
-	Th3ApiModelName string // 接入三方模型名称
+	Th3ApiAK             string // 接入三方api口令
+	Th3ApiBaseUrl        string // 接入三方api请求URL
+	Th3ApiTimeOut        int    // 请求三方http总超时时间,  默认15*60s
+	Th3ApiTCPDialTimeout int    // 请求三方tcp dial超时时间， 默认5s
+	Th3ApiModelName      string // 接入三方模型名称
 
 	LogDir        string // 日志输出路径， 默认在 ./log/{serviceId}.log
 	LogMaxSize    int    // 单个日志文件最大大小(MB)，  默认50MB
@@ -87,7 +89,20 @@ func NewBaseConf(cfg map[string]string) error {
 		}
 		baseConf.Th3ApiTimeOut = int(timeout)
 	} else {
-		baseConf.Th3ApiTimeOut = 60
+		baseConf.Th3ApiTimeOut = 15 * 60
+	}
+
+	if v, ok := cfg[CFG_KEY_TH3API_TCP_DIAL_TIMEOUT]; ok {
+		timeout, err := strconv.ParseInt(v, 10, 32)
+		if err != nil {
+			return fmt.Errorf(" Wrapper Conf[%s=%s] is not num", CFG_KEY_TH3API_TCP_DIAL_TIMEOUT, v)
+		}
+		if timeout <= 0 {
+			return fmt.Errorf(" Wrapper Conf[%s=%s] is less than or equal to 0", CFG_KEY_TH3API_TCP_DIAL_TIMEOUT, v)
+		}
+		baseConf.Th3ApiTCPDialTimeout = int(timeout)
+	} else {
+		baseConf.Th3ApiTCPDialTimeout = 5
 	}
 
 	if v, ok := cfg[CFG_KEY_TH3API_MODEL_NAME]; ok {
