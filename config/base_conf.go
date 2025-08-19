@@ -14,6 +14,7 @@ const (
 	CFG_KEY_TH3API_TIMEOUT          = "th3apiTimeout"
 	CFG_KEY_TH3API_TCP_DIAL_TIMEOUT = "th3apiTcpDialTimeout"
 	CFG_KEY_TH3API_MODEL_NAME       = "th3apiModelName"
+	CFG_KEY_TH3API_MAX_TOKENS_NUM   = "th3apiMaxTokensNum" // 接三方渠道 max_tokens 最大值
 
 	CFG_KEY_LOG_DIR         = "logDir"
 	CFG_KEY_LOG_MAX_SIZE    = "logMaxSize"
@@ -37,6 +38,7 @@ type BaseConf struct {
 	Th3ApiTimeOut        int    // 请求三方http总超时时间,  默认15*60s
 	Th3ApiTCPDialTimeout int    // 请求三方tcp dial超时时间， 默认5s
 	Th3ApiModelName      string // 接入三方模型名称
+	Th3apiMaxTokensNum   int    // 接三方渠道 max_tokens 最大值
 
 	LogDir        string // 日志输出路径， 默认在 ./log/{serviceId}.log
 	LogMaxSize    int    // 单个日志文件最大大小(MB)，  默认50MB
@@ -109,6 +111,17 @@ func NewBaseConf(cfg map[string]string) error {
 		baseConf.Th3ApiModelName = v
 	} else {
 		return fmt.Errorf(" Wrapper Conf[%s] is empty! ", CFG_KEY_TH3API_MODEL_NAME)
+	}
+
+	if v, ok := cfg[CFG_KEY_TH3API_MAX_TOKENS_NUM]; ok {
+		maxTokensNum, err := strconv.ParseInt(v, 10, 32)
+		if err != nil {
+			return fmt.Errorf(" Wrapper Conf[%s=%s] is not num", CFG_KEY_TH3API_MAX_TOKENS_NUM, v)
+		}
+		if maxTokensNum <= 0 {
+			return fmt.Errorf(" Wrapper Conf[%s=%s] is less than or equal to 0", CFG_KEY_TH3API_MAX_TOKENS_NUM, v)
+		}
+		baseConf.Th3apiMaxTokensNum = int(maxTokensNum)
 	}
 
 	// 日志配置初始化

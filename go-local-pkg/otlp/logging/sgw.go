@@ -1,4 +1,4 @@
-package internal
+package logging
 
 import (
 	"bytes"
@@ -10,29 +10,29 @@ import (
 	"time"
 )
 
-type Sgw struct {
+const (
+	DEFAULT_TIMEOUT = 30
+)
+
+var (
 	sgwClient apiV1.APIV1Client
-	Namespace string
-	LinkTtl   int
-}
+)
 
 type SgwConfig struct {
 	SgwAccessKey string
 	SgwSecretKey string
 	SgwAddress   string
-	SgwUpTimeOut time.Duration // 上传超时时间 改成ms，小于eventlog的flushtimeout
+	SgwUpTimeOut time.Duration
 	SgwLogPath   string
 	SgwLogLevel  int
-	Namespace    string
-	LinkTtl      int
 }
 
-func NewSgw(conf *SgwConfig) (*Sgw, error) {
+func initSgw(conf *SgwConfig) (err error) {
 	if len(conf.SgwLogPath) == 0 {
 		path, _ := os.Getwd()
-		conf.SgwLogPath = filepath.Join(path, "sgwsdk.log")
+		conf.SgwLogPath = filepath.Join(path, "sgw_sdk.log")
 	}
-	sgwClient, err := apiV1.NewV1Client(&common.CliConf{
+	if sgwClient, err = apiV1.NewV1Client(&common.CliConf{
 		UseFinder: false,
 		Address:   []string{conf.SgwAddress},
 		FinderURL: "",
@@ -40,30 +40,24 @@ func NewSgw(conf *SgwConfig) (*Sgw, error) {
 		LogName:  conf.SgwLogPath,
 		LogLevel: conf.SgwLogLevel, // error
 		UseTLS:   false,
-		TimeOut:  int(conf.SgwUpTimeOut.Milliseconds()),
-	}, conf.SgwAccessKey, conf.SgwSecretKey)
-	if err != nil {
-		return nil, err
+		TimeOut:  int(conf.SgwUpTimeOut.Seconds()),
+	}, conf.SgwAccessKey, conf.SgwSecretKey); err != nil {
+		return err
 	}
-
-	return &Sgw{
-		sgwClient: sgwClient,
-		Namespace: conf.Namespace,
-		LinkTtl:   conf.LinkTtl,
-	}, nil
+	return nil
 }
 
-func (s *Sgw) Upload(ctx context.Context, file []byte) (string, error) {
-	res, err := s.sgwClient.FileUpload(ctx, apiV1.UploadReq{
-		Namespace: s.Namespace,
+func uploadSgw(ctx context.Context, file []byte, ns string, linkTTL int) (string, error) {
+	res, err := sgwClient.FileUpload(ctx, apiV1.UploadReq{
+		Namespace: ns,
 		File:      bytes.NewReader(file),
 		Length:    len(file),
-		XTtl:      s.LinkTtl,
+		XTtl:      linkTTL,
 		Query: apiV1.UploadQuery{
 			GetLink:   true,
-			LinkTtl:   s.LinkTtl,
+			LinkTtl:   linkTTL,
 			SplitHost: false,
-			//Filename:  "test.otlplog",
+			//Filename:  "test.logging",
 			//Expose:    true,
 		},
 	})

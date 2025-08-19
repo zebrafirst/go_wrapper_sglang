@@ -3,13 +3,8 @@ package logging
 import (
 	"context"
 	"errors"
-	"log"
-	"os"
-	"time"
-
 	"git.iflytek.com/AIaaS/otlp-self/v3"
-	"git.iflytek.com/AIaaS/otlp-self/v3/global/kv"
-	"git.iflytek.com/AIaaS/otlp-self/v3/internal"
+	"git.iflytek.com/AIaaS/otlp-self/v3/logging/kv"
 	"git.iflytek.com/AIaaS/otlp-self/v3/utils"
 	"git.iflytek.com/AIaaS/otlp-self/v3/zaplog"
 	"go.opentelemetry.io/otel/attribute"
@@ -20,6 +15,9 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"log"
+	"os"
+	"time"
 )
 
 type OtlpLogProvider struct {
@@ -28,14 +26,10 @@ type OtlpLogProvider struct {
 	dumpEnable           bool
 	dumpDir              string
 	embedOtlpLogProvider *logsdk.LoggerProvider
-	otlpLogFlushPool     *internal.Pool
+	otlpLogFlushPool     *WorkerPool
 	flushTimeOut         time.Duration
 }
 
-// 创建并初始化 OtlpLogProvider。
-// reportAddr 为日志上报地址（如为空则使用默认地址）。
-// opts 为可选参数，支持自定义日志导出、批量处理等配置。
-// 返回 OtlpLogProvider 实例指针和错误信息。
 func NewOtlpLogProvider(reportAddr string, opts ...logOptions) (*OtlpLogProvider, error) {
 	conf := newOtlpLogConfig(opts...)
 	log.Printf("NewOtlpLogProvider with conf: %#+v \n", conf)
@@ -73,25 +67,30 @@ func NewOtlpLogProvider(reportAddr string, opts ...logOptions) (*OtlpLogProvider
 	otlpLogProvider := &OtlpLogProvider{
 		serviceName:          conf.serviceName,
 		embedOtlpLogProvider: provider,
-		otlpLogFlushPool:     internal.NewWorkPool(conf.flushWorkerNum, conf.finiEnableWait),
+		otlpLogFlushPool:     newWorkerPool("otlp_flush", conf.flushQueueSize, conf.flushWorkerNum, conf.flushBlock),
 		flushTimeOut:         conf.flushTimeOut,
 	}
 
-	if conf.logDumpEnable {
+	if conf.dumpEnable {
 		dumpDir := "." + string(os.PathSeparator) + "otlplog"
 		if err = os.MkdirAll(dumpDir, 0755); err != nil {
 			zaplog.SDKLogger.Errorf("mkdir dumpdir err : %v", err)
 			return nil, err
 		}
-		otlpLogProvider.dumpEnable = conf.logDumpEnable
+		otlpLogProvider.dumpEnable = conf.dumpEnable
 		otlpLogProvider.dumpDir = dumpDir
 	}
+	otlpLogProvider.start()
 	return otlpLogProvider, nil
 }
 
-// 创建一个 OtlpLog 实例。
-// serviceName 为空时使用默认服务名。
-// 返回 OtlpLog 实例指针和错误信息。
+func (p *OtlpLogProvider) start() {
+	for _, w := range p.otlpLogFlushPool.workers {
+		w.run(p.otlpLogFlushPool.ctx, p.otlpLogFlushPool.queue)
+	}
+}
+
+// 每次 一个log
 func (op *OtlpLogProvider) OtlpLog(serviceName, sid, host string) (*OtlpLog, error) {
 	if op == nil || op.embedOtlpLogProvider == nil {
 		return nil, errors.New("logProvider or embedOtlpLogProvider can not be nil")
@@ -110,11 +109,7 @@ func (op *OtlpLogProvider) OtlpLog(serviceName, sid, host string) (*OtlpLog, err
 	return otlpLog, nil
 }
 
-// 记录一条日志（带自定义 kv 参数），并立即刷新到后端。
-// serviceName 为空时使用默认服务名。
-// sid 为日志标识符，按照规范填写。
-// host 为日志记录的主机地址或标识符。
-// kv 为日志的键值对信息。
+// 记录kv
 func (op *OtlpLogProvider) Log(serviceName, sid, host string, kv ...kv.KV) {
 	if op == nil || op.embedOtlpLogProvider == nil {
 		return
@@ -127,16 +122,15 @@ func (op *OtlpLogProvider) Log(serviceName, sid, host string, kv ...kv.KV) {
 		message: map[string]interface{}{SERVICE_NAME: serviceName, SID: sid, HOST: host, TIMESTAMP: utils.CurrentTimeMillis()},
 		p:       op,
 	}
-	for _, v := range kv {
-		otlpLog.message[v.Key] = v.Value
+	if kv != nil {
+		for _, v := range kv {
+			otlpLog.message[v.Key] = v.Value
+		}
 	}
 	otlpLog.Flush()
 }
 
-// 创建一个 OtlpLog 实例（单条日志），但不会自动刷新到后端，需要调用 Flush 方法手动提交。
-// serviceName 为空时使用默认服务名。
-// sid 为日志标识符，按照规范填写。
-// host 为日志记录的主机地址或标识符。
+// 调用此接口记录msg 需要手动刷新
 func (op *OtlpLogProvider) NewLog(serviceName, sid, host string) *OtlpLog {
 	if op == nil || op.embedOtlpLogProvider == nil {
 		return nil
@@ -160,7 +154,7 @@ func (o *OtlpLogProvider) Fini() (err error) {
 		return err
 	}
 	if o.otlpLogFlushPool != nil {
-		o.otlpLogFlushPool.Stop()
+		o.otlpLogFlushPool.stop()
 	}
 	return
 }

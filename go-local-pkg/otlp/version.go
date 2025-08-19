@@ -1,7 +1,7 @@
 package otlp
 
 const (
-	SrvName     string = "event_log_sdk"
-	Version     string = "0.1.0"
+	SrvName     string = "otlp_sdk"
+	Version     string = "3.2.6"
 	Environment string = "prod"
 )

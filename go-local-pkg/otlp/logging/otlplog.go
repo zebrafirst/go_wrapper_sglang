@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
-	"os"
-	"sync"
-
-	"git.iflytek.com/AIaaS/otlp-self/v3/global/kv"
+	"git.iflytek.com/AIaaS/otlp-self/v3/logging/kv"
 	"git.iflytek.com/AIaaS/otlp-self/v3/utils"
 	"git.iflytek.com/AIaaS/otlp-self/v3/zaplog"
 	logapi "go.opentelemetry.io/otel/log"
+	"os"
+	"sync"
 )
 
 const (
@@ -28,8 +26,7 @@ type OtlpLog struct {
 	p       *OtlpLogProvider
 }
 
-// 追加 kv 参数到日志内容，并立即刷新到后端。
-// kv 为日志的键值对内容。
+// 记录kv 标准使用
 func (ol *OtlpLog) LogMsgAndFlush(kv ...kv.KV) {
 	if ol == nil || ol.message == nil {
 		return
@@ -42,21 +39,20 @@ func (ol *OtlpLog) LogMsgAndFlush(kv ...kv.KV) {
 	ol.Flush()
 }
 
-// 追加 map 类型的日志内容，并立即刷新到后端。
-// msgs 为map类型的键值对内容。
+// 记录map
 func (ol *OtlpLog) LogMsgsAndFlush(msgs map[string]interface{}) {
 	if ol == nil || ol.message == nil || msgs == nil {
 		return
 	}
 	ol.lock.RLock()
-	maps.Copy(ol.message, msgs)
+	for k, v := range msgs {
+		ol.message[k] = v
+	}
 	ol.lock.RUnlock()
 	ol.Flush()
 }
 
-// 追加 kv 参数到日志内容，但不会自动刷新到后端，需要手动调用 Flush。
-// kv 为日志的键值对内容。
-// 返回 OtlpLog 实例指针，便于链式调用。
+// 此接口需要自己手动flush
 func (ol *OtlpLog) LogMsg(kv ...kv.KV) *OtlpLog {
 	if ol == nil || ol.message == nil || kv == nil {
 		return ol
@@ -81,32 +77,32 @@ func (ol *OtlpLog) dump(dir string) {
 	}
 }
 
-// 刷新日志到后端。
 func (ol *OtlpLog) Flush() {
-	defer utils.Catch("OtlpLog Flush")
+	defer utils.Catch("otlplog flush")
 	if ol == nil || ol.p == nil {
 		return
 	}
-	f := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), ol.p.flushTimeOut)
-		defer cancel()
-		for {
-			select {
-			case <-ctx.Done():
-				zaplog.SDKLogger.Errorf("otlplog flush err: %v", ctx.Err())
-				return
-			default:
-				logBytes, _ := json.Marshal(ol.message)
-				record := logapi.Record{}
-				record.SetBody(logapi.BytesValue(logBytes))
-				ol.logger.Emit(context.Background(), record)
-				// 本地下载验证
-				if ol.p.dumpEnable {
-					ol.dump(ol.p.dumpDir)
+	ol.p.otlpLogFlushPool.AppendJob(&Task{
+		f: func() {
+			ctx, cancel := context.WithTimeout(context.Background(), ol.p.flushTimeOut)
+			defer cancel()
+			for {
+				select {
+				case <-ctx.Done():
+					zaplog.SDKLogger.Errorf("otlplog flush err: %v", ctx.Err())
+					return
+				default:
+					logBytes, _ := json.Marshal(ol.message)
+					record := logapi.Record{}
+					record.SetBody(logapi.BytesValue(logBytes))
+					ol.logger.Emit(context.Background(), record)
+					// 本地下载验证
+					if ol.p.dumpEnable {
+						ol.dump(ol.p.dumpDir)
+					}
+					return
 				}
-				return
 			}
-		}
-	}
-	ol.p.otlpLogFlushPool.Submit(f)
+		},
+	})
 }

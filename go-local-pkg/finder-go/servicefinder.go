@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"sync"
 
+	"strings"
+
 	common "git.iflytek.com/AIaaS/finder-go-self/common"
 	errors "git.iflytek.com/AIaaS/finder-go-self/errors"
 	"git.iflytek.com/AIaaS/finder-go-self/log"
@@ -14,19 +16,17 @@ import (
 	"git.iflytek.com/AIaaS/finder-go-self/storage"
 	"git.iflytek.com/AIaaS/finder-go-self/utils/serviceutil"
 	"git.iflytek.com/AIaaS/finder-go-self/utils/stringutil"
-	"strings"
 )
-
 
 var (
-	prefix = flag.String("polaris-prefix-self","","config center zookeeper path prefix")
+	prefix = flag.String("polaris-prefix-self", "", "config center zookeeper path prefix")
 )
 
-func addPrefixToPath(pth string)string{
-	if !flag.Parsed(){
+func addPrefixToPath(pth string) string {
+	if !flag.Parsed() {
 		flag.Parse()
 	}
-	if *prefix== ""{
+	if *prefix == "" {
 		return pth
 	}
 	return *prefix + pth

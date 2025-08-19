@@ -14,10 +14,11 @@ type logConfig struct {
 	exportMaxBatchSize int           // 批量发送大小默认512
 	maxQueueSize       int           // record
 	maxGrpcSendSize    int           // grpc客户端数据限制大小
+	flushQueueSize     int           // flush队列大小
 	flushWorkerNum     int           // flush工作协程数
-	finiEnableWait     bool          // flush是否阻塞 默认非阻塞
+	flushBlock         bool          // flush是否阻塞 默认非阻塞
 	flushTimeOut       time.Duration
-	logDumpEnable      bool // 是否开启dump 默认为false 研测调试，线上不要开启
+	dumpEnable         bool // 是否开启dump 默认为false 研测调试，线上不要开启
 }
 
 type logOptions func(*logConfig)
@@ -31,8 +32,9 @@ func newOtlpLogConfig(opts ...logOptions) *logConfig {
 		exportMaxBatchSize: DEFAULT_EXPORT_MAX_BATCH_SIZE,
 		maxQueueSize:       DEFAULT_MAX_QUEUE_SIZE,
 		maxGrpcSendSize:    DEFAULT_MAX_GRPC_SEND_SIZE,
+		flushQueueSize:     DEFAULT_FLUSH_QUEUE_SIZE,
 		flushWorkerNum:     DEFAULT_FLUSH_WORKER_NUM,
-		finiEnableWait:     DEFAULT_FINI_ENABLE_WAIT,
+		flushBlock:         DEFAULT_FLUSH_BLOCK,
 		flushTimeOut:       DEFAULT_FLUSH_TIMEOUT,
 	}
 	for _, opt := range opts {
@@ -88,6 +90,12 @@ func WithLogMaxGrpcSendSize(maxGrpcSendSize int) logOptions {
 	}
 }
 
+func WithLogFlushQueueSize(flushQueueSize int) logOptions {
+	return func(oc *logConfig) {
+		oc.flushQueueSize = flushQueueSize
+	}
+}
+
 func WithLogFlushWorkerNum(flushWorkerNum int) logOptions {
 	return func(oc *logConfig) {
 		oc.flushWorkerNum = flushWorkerNum
@@ -95,9 +103,9 @@ func WithLogFlushWorkerNum(flushWorkerNum int) logOptions {
 }
 
 // 默认非阻塞 false
-func WithLogFiniEnableWait(finiEnableWait bool) logOptions {
+func WithLogFlushBlock(flushBlock bool) logOptions {
 	return func(oc *logConfig) {
-		oc.finiEnableWait = finiEnableWait
+		oc.flushBlock = flushBlock
 	}
 }
 
@@ -108,8 +116,8 @@ func WithLogFlushTimeOut(flushTimeOut time.Duration) logOptions {
 	}
 }
 
-func WithLogDumpEnable(logDumpEnable bool) logOptions {
+func WithDumpEnable(dumpEnable bool) logOptions {
 	return func(oc *logConfig) {
-		oc.logDumpEnable = logDumpEnable
+		oc.dumpEnable = dumpEnable
 	}
 }

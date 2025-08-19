@@ -349,9 +349,15 @@ func (th3api *OpenAITh3API) attachBaseParam(chatReq *openai.ChatCompletionReques
 
 	// top_k openai 协议无top_k参数，先不管这个参数
 
+	// max_tokens
 	if v, ok := th3api.Inst.Params[common.BASE_REQ_KEY_MAX_TOKENS]; ok {
 		if maxTokens, err := strconv.ParseInt(v, 10, 32); err == nil {
-			chatReq.MaxTokens = int(maxTokens)
+			// max_tokens 不能超过三方协议要求的最大值
+			if config.GetBaseConf().Th3apiMaxTokensNum != 0 && int(maxTokens) >= config.GetBaseConf().Th3apiMaxTokensNum {
+				chatReq.MaxTokens = config.GetBaseConf().Th3apiMaxTokensNum
+			} else {
+				chatReq.MaxTokens = int(maxTokens)
+			}
 		} else {
 			th3apiutils.WLogger.Warn("Parse maxTokens failed", zap.String("maxTokens", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
 		}
@@ -362,7 +368,7 @@ func (th3api *OpenAITh3API) attachBaseParam(chatReq *openai.ChatCompletionReques
 		if topP, err := strconv.ParseFloat(v, 32); err == nil {
 			chatReq.TopP = float32(topP)
 		} else {
-			th3apiutils.WLogger.Warn("Parse maxTokens failed", zap.String("topP", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+			th3apiutils.WLogger.Warn("Parse topP failed", zap.String("topP", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
 		}
 	}
 

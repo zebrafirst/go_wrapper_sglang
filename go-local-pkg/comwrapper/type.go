@@ -11,6 +11,7 @@ const (
 	DataImage DataType = 2 // 图像数据
 	DataVideo DataType = 3 // 视频数据
 	DataPer   DataType = 4 // 个性化数据
+	DataRaw   DataType = 4 // 二进制流
 
 	DataBegin    DataStatus = 0 // 首数据
 	DataContinue DataStatus = 1 // 中间数据
@@ -32,4 +33,3 @@ const (
 	FuncMeter    CustomFuncType = 1
 	FuncLbExtra  CustomFuncType = 4
 )
-
