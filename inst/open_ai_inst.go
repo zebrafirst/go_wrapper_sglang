@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"th3api/common"
 	"th3api/common/model"
@@ -98,7 +99,7 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 		}
 		retTT = append(retTT, elapsed)
 
-		if errors.Is(err, io.EOF) { // 处理最后一帧
+		if errors.Is(err, io.EOF) { // 判断会话是否结束
 			th3apiutils.WLogger.Info("Stream finished")
 			return nil
 		}
@@ -111,14 +112,20 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			return errconvert.WrapperErr(err, errconvert.CallTh3ApiUnknowErrCode.Code)
 		}
 
+		if _, ok := logMap["trdId"]; !ok && response.ID != "" {
+			logMap["trdId"] = response.ID
+		}
+
 		th3apiutils.WLogger.Debug("", zap.Any("resp", response))
 
 		// 状态变更
 		if th3api.Inst.IsFirstRet {
 			th3api.Inst.Status = common.SESSION_STATUS_BEGIN
 			th3api.Inst.IsFirstRet = false
-		} else if response.Usage != nil {
-			th3api.Inst.Status = common.SESSION_STATUS_END
+		} else if response.Usage != nil { // 三方api火山出现最后一帧后，会再发一个usage; 我们自己最后一帧会把usage带上，不会再发一个usage。不管怎么样，当usage tokens不为零时，认为会话的最后一帧出现
+			if response.Usage.CompletionTokens != 0 || response.Usage.PromptTokens != 0 || response.Usage.TotalTokens != 0 {
+				th3api.Inst.Status = common.SESSION_STATUS_END
+			}
 		} else {
 			th3api.Inst.Status = common.SESSION_STATUS_CONTINUE
 		}
@@ -169,14 +176,20 @@ func (th3api *OpenAITh3API) PushBack(cb comwrapper.CallBackPtr) error {
 			logMap["usage"] = usage
 
 			// 上报自定义计量数据
-			if code := common.MeterFunc(th3api.Inst.UsrTag, "total_tokens", usage.TotalTokens); code != 0 {
-				th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("total_tokens", usage.TotalTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag))
+			if usage.TotalTokens != 0 {
+				if code := common.MeterFunc(th3api.Inst.UsrTag, "total_tokens", usage.TotalTokens); code != 0 {
+					th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("total_tokens", usage.TotalTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag), zap.Int("code", code))
+				}
 			}
-			if code := common.MeterFunc(th3api.Inst.UsrTag, "completion_tokens", usage.CompletionTokens); code != 0 {
-				th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("completion_tokens", usage.CompletionTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag))
+			if usage.CompletionTokens != 0 {
+				if code := common.MeterFunc(th3api.Inst.UsrTag, "completion_tokens", usage.CompletionTokens); code != 0 {
+					th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("completion_tokens", usage.CompletionTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag), zap.Int("code", code))
+				}
 			}
-			if code := common.MeterFunc(th3api.Inst.UsrTag, "prompt_tokens", usage.PromptTokens); code != 0 {
-				th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("prompt_tokens", usage.PromptTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag))
+			if usage.PromptTokens != 0 {
+				if code := common.MeterFunc(th3api.Inst.UsrTag, "prompt_tokens", usage.PromptTokens); code != 0 {
+					th3apiutils.WLogger.Warn("自定义计量失败", zap.Int("prompt_tokens", usage.PromptTokens), zap.String("sid", th3api.Inst.Sid), zap.String("usrTag", th3api.Inst.UsrTag), zap.Int("code", code))
+				}
 			}
 
 			usageJsonBytes, _ := json.Marshal(usage)
@@ -260,9 +273,27 @@ func (th3api *OpenAITh3API) buildChatReqMessage() ([]openai.ChatCompletionMessag
 
 	for _, v := range th3api.Inst.InDatas {
 		ldMessage := LoaderMessage{}
-		if err := json.Unmarshal([]byte(v), &ldMessage); err != nil {
-			th3apiutils.WLogger.Error("Unmarshal loader message failed", zap.String("message", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
-			return nil, err
+		if strings.HasPrefix(strings.TrimSpace(v), "[") {
+			var messages []Message
+			if err := json.Unmarshal([]byte(v), &messages); err == nil {
+				// 尝试按照 [{\"content\":\"3+10等于多少？\",\"role\":\"user\",\"index\":0}] 反序列化
+				for _, msg := range messages {
+					if msg.Role == "" || msg.Content == "" {
+						th3apiutils.WLogger.Error("Invalid message format", zap.String("message", v), zap.String("sid", th3api.Inst.Sid))
+						return nil, err
+					}
+				}
+				ldMessage.Messages = messages
+			} else {
+				th3apiutils.WLogger.Error("Unmarshal loader message failed", zap.String("message", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+				return nil, err
+			}
+		} else {
+			// 再尝试按照 {\"messages\":[{\"role\": \"user\",\"content\": \"Give me the information of the capital of China in the JSON format.\"}]}
+			if err := json.Unmarshal([]byte(v), &ldMessage); err != nil {
+				th3apiutils.WLogger.Error("Unmarshal loader message failed", zap.String("message", v), zap.Any("err", err), zap.String("sid", th3api.Inst.Sid))
+				return nil, err
+			}
 		}
 
 		for i, v := range ldMessage.Messages {
